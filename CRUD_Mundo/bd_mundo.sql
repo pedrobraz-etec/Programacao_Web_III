@@ -1,10 +1,58 @@
-CREATE DATABASE IF NOT EXISTS bd_mundo CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+CREATE DATABASE bd_mundo;
+
 USE bd_mundo;
-CREATE TABLE continentes(id INT AUTO_INCREMENT PRIMARY KEY,nome VARCHAR(100) NOT NULL,populacao BIGINT UNSIGNED NOT NULL DEFAULT 0,area DECIMAL(15,2) NOT NULL DEFAULT 0,total_paises INT UNSIGNED NOT NULL DEFAULT 0);
-CREATE TABLE governantes(id INT AUTO_INCREMENT PRIMARY KEY,nome VARCHAR(150) NOT NULL,partido_politico VARCHAR(100) NOT NULL,data_nascimento DATE NOT NULL,idade INT UNSIGNED NOT NULL,inicio_mandato DATE NOT NULL,fim_mandato DATE NOT NULL);
-CREATE TABLE paises(id INT AUTO_INCREMENT PRIMARY KEY,nome VARCHAR(100) NOT NULL,continente_id INT NOT NULL,populacao BIGINT UNSIGNED NOT NULL DEFAULT 0,area DECIMAL(15,2) NOT NULL DEFAULT 0,idioma VARCHAR(100) NOT NULL,governante_id INT NOT NULL,clima VARCHAR(100) NOT NULL,regime_politico VARCHAR(100) NOT NULL,moeda VARCHAR(100) NOT NULL,FOREIGN KEY(continente_id) REFERENCES continentes(id) ON DELETE RESTRICT ON UPDATE CASCADE,FOREIGN KEY(governante_id) REFERENCES governantes(id) ON DELETE RESTRICT ON UPDATE CASCADE);
-CREATE TABLE cidades(id INT AUTO_INCREMENT PRIMARY KEY,nome VARCHAR(100) NOT NULL,pais_id INT NOT NULL,populacao BIGINT UNSIGNED NOT NULL DEFAULT 0,area DECIMAL(15,2) NOT NULL DEFAULT 0,clima VARCHAR(100) NOT NULL,governante_id INT NOT NULL,data_fundacao DATE NOT NULL,FOREIGN KEY(pais_id) REFERENCES paises(id) ON DELETE CASCADE ON UPDATE CASCADE,FOREIGN KEY(governante_id) REFERENCES governantes(id) ON DELETE RESTRICT ON UPDATE CASCADE);
-INSERT INTO continentes(nome,populacao,area,total_paises) VALUES('América do Sul',439000000,17840000,12),('Europa',745000000,10180000,44),('Ásia',4800000000,44579000,49);
-INSERT INTO governantes(nome,partido_politico,data_nascimento,idade,inicio_mandato,fim_mandato) VALUES('Exemplo Governante','Partido Exemplo','1980-01-15',46,'2024-01-01','2028-12-31'),('Governante Demonstrativo','Partido Mundo','1975-06-20',51,'2023-01-01','2027-12-31');
-INSERT INTO paises(nome,continente_id,populacao,area,idioma,governante_id,clima,regime_politico,moeda) VALUES('Brasil',1,213000000,8515767,'Português',1,'Tropical','República Federativa','Real'),('Portugal',2,10600000,92212,'Português',2,'Mediterrâneo','República','Euro');
-INSERT INTO cidades(nome,pais_id,populacao,area,clima,governante_id,data_fundacao) VALUES('São Paulo',1,12300000,1521,'Subtropical',1,'1554-01-25'),('Lisboa',2,545000,100,'Mediterrâneo',2,'1147-10-25');
+
+CREATE TABLE continentes(
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    nome VARCHAR(100) NOT NULL,
+    populacao BIGINT,
+    area DECIMAL(15,2),
+    total_paises INT
+);
+
+CREATE TABLE governantes(
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    nome VARCHAR(150) NOT NULL,
+    partido_politico VARCHAR(100),
+    data_nascimento DATE,
+    idade INT,
+    inicio_mandato DATE,
+    fim_mandato DATE
+);
+
+CREATE TABLE paises(
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    nome VARCHAR(100) NOT NULL,
+    continente_id INT,
+    populacao BIGINT,
+    area DECIMAL(15,2),
+    idioma VARCHAR(100),
+    governante_id INT,
+    clima VARCHAR(100),
+    regime_politico VARCHAR(100),
+    moeda VARCHAR(100),
+
+    FOREIGN KEY (continente_id)
+    REFERENCES continentes(id),
+
+    FOREIGN KEY (governante_id)
+    REFERENCES governantes(id)
+);
+
+CREATE TABLE cidades(
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    nome VARCHAR(100),
+    pais_id INT,
+    populacao BIGINT,
+    area DECIMAL(15,2),
+    clima VARCHAR(100),
+    governante_id INT,
+    data_fundacao DATE,
+
+    FOREIGN KEY (pais_id)
+    REFERENCES paises(id)
+    ON DELETE CASCADE,
+
+    FOREIGN KEY (governante_id)
+    REFERENCES governantes(id)
+);
