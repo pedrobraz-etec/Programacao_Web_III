@@ -1,4 +1,5 @@
 <?php
+session_start();
 $host="localhost"; $usuario="root"; $senha=""; $banco="bd_mundo";
 $conexao=new mysqli($host,$usuario,$senha,$banco);
 if($conexao->connect_error) die("Erro de conexão: ".$conexao->connect_error);
@@ -6,8 +7,90 @@ $conexao->set_charset("utf8mb4");
 function e($v){return htmlspecialchars($v??"",ENT_QUOTES,"UTF-8");}
 function dataBR($v){return $v?date("d/m/Y",strtotime($v)):"-";}
 function num($v){return number_format((float)$v,2,",",".");}
+define("MAX_TENTATIVAS",3);
+
+function registrarLog($conexao,$usuarioId,$loginTentado,$sucesso,$mensagem){
+ $ip=$_SERVER["REMOTE_ADDR"]??"desconhecido";
+ $s=$conexao->prepare("INSERT INTO logs(usuario_id,login_tentado,sucesso,mensagem,ip) VALUES(?,?,?,?,?)");
+ $s->bind_param("isiss",$usuarioId,$loginTentado,$sucesso,$mensagem,$ip);
+ $s->execute();
+}
+
+$mensagem=""; $erro=""; $erroLogin=""; $mensagemLogin="";
+
+// ---------- LOGOUT ----------
+if(isset($_GET["logout"])){
+ session_unset();
+ session_destroy();
+ header("Location: index.php");
+ exit;
+}
+
+// ---------- PROCESSAMENTO DE LOGIN ----------
+if($_SERVER["REQUEST_METHOD"]==="POST" && ($_POST["acao"]??"")==="login"){
+ $loginDigitado=trim($_POST["login"]??"");
+ $senhaDigitada=$_POST["senha"]??"";
+ $s=$conexao->prepare("SELECT * FROM usuarios WHERE login=?");
+ $s->bind_param("s",$loginDigitado);
+ $s->execute();
+ $u=$s->get_result()->fetch_assoc();
+
+ if(!$u){
+  registrarLog($conexao,null,$loginDigitado,0,"Usuário não encontrado");
+  $erroLogin="Login ou senha inválidos.";
+ }elseif($u["bloqueado"]==1){
+  registrarLog($conexao,$u["id"],$loginDigitado,0,"Tentativa em usuário bloqueado");
+  $erroLogin="Usuário bloqueado após 3 tentativas incorretas. Procure o administrador.";
+ }elseif(password_verify($senhaDigitada,$u["senha"])){
+  // login correto: zera tentativas e cria sessão
+  $conexao->query("UPDATE usuarios SET tentativas_falhas=0 WHERE id=".(int)$u["id"]);
+  registrarLog($conexao,$u["id"],$loginDigitado,1,"Login efetuado com sucesso");
+  $_SESSION["usuario_id"]=$u["id"];
+  $_SESSION["usuario_nome"]=$u["nome"];
+  $_SESSION["usuario_login"]=$u["login"];
+  $_SESSION["primeiro_acesso"]=(int)$u["primeiro_acesso"];
+  header("Location: index.php");
+  exit;
+ }else{
+  // senha incorreta: incrementa tentativas
+  $novasTentativas=$u["tentativas_falhas"]+1;
+  if($novasTentativas>=MAX_TENTATIVAS){
+   $conexao->query("UPDATE usuarios SET tentativas_falhas=$novasTentativas, bloqueado=1 WHERE id=".(int)$u["id"]);
+   registrarLog($conexao,$u["id"],$loginDigitado,0,"Senha incorreta - usuário bloqueado após 3 tentativas");
+   $erroLogin="Senha incorreta. Limite de tentativas atingido: usuário bloqueado.";
+  }else{
+   $conexao->query("UPDATE usuarios SET tentativas_falhas=$novasTentativas WHERE id=".(int)$u["id"]);
+   registrarLog($conexao,$u["id"],$loginDigitado,0,"Senha incorreta");
+   $restantes=MAX_TENTATIVAS-$novasTentativas;
+   $erroLogin="Senha incorreta. Você tem mais $restantes tentativa(s) antes do bloqueio.";
+  }
+ }
+}
+
+// ---------- TROCA DE SENHA NO PRIMEIRO ACESSO ----------
+if($_SERVER["REQUEST_METHOD"]==="POST" && ($_POST["acao"]??"")==="trocar_senha" && isset($_SESSION["usuario_id"])){
+ $novaSenha=$_POST["nova_senha"]??"";
+ $confirmarSenha=$_POST["confirmar_senha"]??"";
+ if(strlen($novaSenha)<6){
+  $erroLogin="A nova senha deve ter pelo menos 6 caracteres.";
+ }elseif($novaSenha!==$confirmarSenha){
+  $erroLogin="As senhas digitadas não coincidem.";
+ }else{
+  $hash=password_hash($novaSenha,PASSWORD_DEFAULT);
+  $s=$conexao->prepare("UPDATE usuarios SET senha=?, primeiro_acesso=0 WHERE id=?");
+  $s->bind_param("si",$hash,$_SESSION["usuario_id"]);
+  $s->execute();
+  $_SESSION["primeiro_acesso"]=0;
+  $mensagemLogin="Senha alterada com sucesso!";
+ }
+}
+
+// ---------- BLOQUEIA ACESSO SEM SESSÃO ----------
+$logado=isset($_SESSION["usuario_id"]);
+$precisaTrocarSenha=$logado && (int)($_SESSION["primeiro_acesso"]??0)===1;
+
 $pagina=$_GET["pagina"]??"home"; $mensagem=""; $erro="";
-if($_SERVER["REQUEST_METHOD"]==="POST"){
+if($_SERVER["REQUEST_METHOD"]==="POST" && $logado && !$precisaTrocarSenha){
  try{
   $a=$_POST["acao"]??"";
   if($a==="cadastrar_continente"||$a==="editar_continente"){
@@ -52,7 +135,7 @@ if($_SERVER["REQUEST_METHOD"]==="POST"){
   }
  }catch(Throwable $x){$erro="Não foi possível realizar a operação. Verifique os dados e os relacionamentos.";}
 }
-if(isset($_GET["excluir"],$_GET["tipo"])){
+if(isset($_GET["excluir"],$_GET["tipo"]) && $logado && !$precisaTrocarSenha){
  $map=["continente"=>"continentes","governante"=>"governantes","pais"=>"paises","cidade"=>"cidades"];
  $id=(int)$_GET["excluir"]; $tipo=$_GET["tipo"];
  if(isset($map[$tipo])) try{$s=$conexao->prepare("DELETE FROM ".$map[$tipo]." WHERE id=?");$s->bind_param("i",$id);$s->execute();$mensagem="Registro excluído com sucesso!";}catch(Throwable $x){$erro="Não foi possível excluir. O registro possui vínculos no banco.";}
@@ -61,8 +144,36 @@ if(isset($_GET["excluir"],$_GET["tipo"])){
 <!doctype html><html lang="pt-br"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>CRUD Mundo</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}body{font-family:Arial,sans-serif;background:#eef3f8;color:#17202a}header{background:linear-gradient(135deg,#063970,#087fbd);color:#fff;padding:28px 5%}header h1{font-size:30px}header p{margin-top:6px}nav{background:#fff;padding:14px 5%;display:flex;gap:10px;flex-wrap:wrap;box-shadow:0 2px 8px #0001}nav a{color:#063970;text-decoration:none;font-weight:bold;padding:10px 15px;border-radius:8px}nav a:hover,nav a.ativo{background:#087fbd;color:#fff}.container{width:90%;max-width:1250px;margin:28px auto}.card,.stat{background:#fff;border-radius:14px;padding:24px;box-shadow:0 5px 20px #00000012;margin-bottom:22px}h2{color:#063970;margin-bottom:18px}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px}label{display:block;font-weight:bold;margin-bottom:6px}input,select{width:100%;padding:11px;border:1px solid #ccd6df;border-radius:8px}button,.btn{display:inline-block;border:0;border-radius:8px;padding:10px 16px;font-weight:bold;cursor:pointer;text-decoration:none}.btn-success{background:#198754;color:#fff}.btn-warning{background:#f0ad00;color:#111}.btn-danger{background:#dc3545;color:#fff}.btn-secondary{background:#6c757d;color:#fff}table{width:100%;border-collapse:collapse;margin-top:18px}th,td{padding:11px;border-bottom:1px solid #e1e7ec;text-align:left}th{background:#063970;color:#fff}.actions{display:flex;gap:7px;flex-wrap:wrap}.alert{padding:13px 16px;border-radius:8px;margin-bottom:18px}.success{background:#d1e7dd;color:#0f5132}.error{background:#f8d7da;color:#842029}.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:16px}.stat strong{display:block;font-size:28px;color:#087fbd;margin-top:8px}.search{margin-bottom:15px}footer{text-align:center;color:#667;padding:25px}@media(max-width:700px){table{display:block;overflow-x:auto;white-space:nowrap}}
+.login-wrap{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px}.login-box{background:#fff;border-radius:14px;padding:36px;box-shadow:0 5px 25px #00000018;width:100%;max-width:380px}.login-box h2{color:#063970;margin-bottom:6px;text-align:center}.login-box p.subtitulo{text-align:center;color:#667;margin-bottom:22px;font-size:14px}.login-box label{display:block;font-weight:bold;margin-bottom:6px;margin-top:14px}.login-box input{width:100%;padding:11px;border:1px solid #ccd6df;border-radius:8px}.login-box button{width:100%;margin-top:22px;padding:12px;background:#087fbd;color:#fff;border:0;border-radius:8px;font-weight:bold;cursor:pointer}.login-box button:hover{background:#063970}.user-bar{display:flex;justify-content:flex-end;align-items:center;gap:14px;padding:10px 5%;background:#fff;font-size:14px;color:#063970}.user-bar a{color:#dc3545;font-weight:bold;text-decoration:none}
 </style></head><body>
+<?php if(!$logado): ?>
+<div class="login-wrap"><div class="login-box">
+<h2>CRUD Mundo</h2><p class="subtitulo">Acesso ao sistema</p>
+<?php if($erroLogin):?><div class="alert error"><?=e($erroLogin)?></div><?php endif;?>
+<?php if($mensagemLogin):?><div class="alert success"><?=e($mensagemLogin)?></div><?php endif;?>
+<form method="post">
+<input type="hidden" name="acao" value="login">
+<label>Login</label><input type="text" name="login" required autofocus>
+<label>Senha</label><input type="password" name="senha" required>
+<button>Entrar</button>
+</form>
+</div></div>
+
+<?php elseif($precisaTrocarSenha): ?>
+<div class="login-wrap"><div class="login-box">
+<h2>Troca de senha obrigatória</h2><p class="subtitulo">Este é o seu primeiro acesso. Defina uma nova senha para continuar.</p>
+<?php if($erroLogin):?><div class="alert error"><?=e($erroLogin)?></div><?php endif;?>
+<form method="post">
+<input type="hidden" name="acao" value="trocar_senha">
+<label>Nova senha</label><input type="password" name="nova_senha" minlength="6" required>
+<label>Confirmar nova senha</label><input type="password" name="confirmar_senha" minlength="6" required>
+<button>Salvar nova senha</button>
+</form>
+</div></div>
+
+<?php else: ?>
 <header><h1>CRUD Mundo</h1><p>Gerenciamento de Continentes, Países, Cidades e Governantes</p></header>
+<div class="user-bar">Olá, <strong>&nbsp;<?=e($_SESSION["usuario_nome"])?></strong>&nbsp;|&nbsp;<a href="?logout=1">Sair</a></div>
 <nav><a class="<?= $pagina==='home'?'ativo':''?>" href="index.php">Início</a><a class="<?= $pagina==='continentes'?'ativo':''?>" href="?pagina=continentes">Continentes</a><a class="<?= $pagina==='governantes'?'ativo':''?>" href="?pagina=governantes">Governantes</a><a class="<?= $pagina==='paises'?'ativo':''?>" href="?pagina=paises">Países</a><a class="<?= $pagina==='cidades'?'ativo':''?>" href="?pagina=cidades">Cidades</a></nav>
 <div class="container"><?php if($mensagem):?><div class="alert success"><?=e($mensagem)?></div><?php endif;?><?php if($erro):?><div class="alert error"><?=e($erro)?></div><?php endif;?>
 
@@ -91,4 +202,5 @@ $ed=(int)($_GET["editar"]??0);$r=$ed?$conexao->query("SELECT * FROM cidades WHER
 <div class="card"><h2>Cidades cadastradas</h2><input class="search" placeholder="Pesquisar..." oninput="filtrar(this)"><table><tr><th>ID</th><th>Nome</th><th>País</th><th>População</th><th>Área</th><th>Clima</th><th>Fundação</th><th>Ações</th></tr><?php $q=$conexao->query("SELECT c.*,p.nome pais FROM cidades c LEFT JOIN paises p ON p.id=c.pais_id ORDER BY c.nome");while($x=$q->fetch_assoc()):?><tr><td><?=$x['id']?></td><td><?=e($x['nome'])?></td><td><?=e($x['pais'])?></td><td><?=number_format($x['populacao'],0,",",".")?></td><td><?=num($x['area'])?></td><td><?=e($x['clima'])?></td><td><?=dataBR($x['data_fundacao'])?></td><td class="actions"><a class="btn btn-warning" href="?pagina=cidades&editar=<?=$x['id']?>">Editar</a><a class="btn btn-danger" href="?pagina=cidades&excluir=<?=$x['id']?>&tipo=cidade" onclick="return confirm('Excluir cidade?')">Excluir</a></td></tr><?php endwhile;?></table></div>
 <?php endif;?></div><footer>CRUD Mundo - Programação Web</footer>
 <script>function filtrar(i){let t=i.value.toLowerCase();i.parentElement.querySelectorAll("tbody tr").forEach(r=>r.style.display=r.innerText.toLowerCase().includes(t)?"":"none")}</script>
+<?php endif; ?>
 </body></html>
