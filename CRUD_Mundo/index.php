@@ -90,6 +90,38 @@ $logado=isset($_SESSION["usuario_id"]);
 $precisaTrocarSenha=$logado && (int)($_SESSION["primeiro_acesso"]??0)===1;
 
 $pagina=$_GET["pagina"]??"home"; $mensagem=""; $erro="";
+
+// ---------- MANUTENÇÃO DE SENHA (usuário já logado, troca voluntária) ----------
+$erroSenha=""; $mensagemSenha="";
+if($_SERVER["REQUEST_METHOD"]==="POST" && ($_POST["acao"]??"")==="alterar_senha" && $logado && !$precisaTrocarSenha){
+ $senhaAtual=$_POST["senha_atual"]??"";
+ $novaSenha=$_POST["nova_senha"]??"";
+ $confirmarSenha=$_POST["confirmar_senha"]??"";
+
+ $s=$conexao->prepare("SELECT * FROM usuarios WHERE id=?");
+ $s->bind_param("i",$_SESSION["usuario_id"]);
+ $s->execute();
+ $u=$s->get_result()->fetch_assoc();
+
+ if(!$u || !password_verify($senhaAtual,$u["senha"])){
+  registrarLog($conexao,$_SESSION["usuario_id"],$_SESSION["usuario_login"],0,"Tentativa de troca de senha com senha atual incorreta");
+  $erroSenha="Senha atual incorreta.";
+ }elseif(strlen($novaSenha)<6){
+  $erroSenha="A nova senha deve ter pelo menos 6 caracteres.";
+ }elseif($novaSenha!==$confirmarSenha){
+  $erroSenha="A nova senha e a confirmação não coincidem.";
+ }elseif(password_verify($novaSenha,$u["senha"])){
+  $erroSenha="A nova senha deve ser diferente da senha atual.";
+ }else{
+  $hash=password_hash($novaSenha,PASSWORD_DEFAULT);
+  $s=$conexao->prepare("UPDATE usuarios SET senha=? WHERE id=?");
+  $s->bind_param("si",$hash,$_SESSION["usuario_id"]);
+  $s->execute();
+  registrarLog($conexao,$_SESSION["usuario_id"],$_SESSION["usuario_login"],1,"Senha alterada pelo próprio usuário");
+  $mensagemSenha="Senha alterada com sucesso!";
+ }
+ $pagina="alterar_senha";
+}
 if($_SERVER["REQUEST_METHOD"]==="POST" && $logado && !$precisaTrocarSenha){
  try{
   $a=$_POST["acao"]??"";
@@ -173,8 +205,8 @@ if(isset($_GET["excluir"],$_GET["tipo"]) && $logado && !$precisaTrocarSenha){
 
 <?php else: ?>
 <header><h1>CRUD Mundo</h1><p>Gerenciamento de Continentes, Países, Cidades e Governantes</p></header>
-<div class="user-bar">Olá, <strong>&nbsp;<?=e($_SESSION["usuario_nome"])?></strong>&nbsp;|&nbsp;<a href="?logout=1">Sair</a></div>
-<nav><a class="<?= $pagina==='home'?'ativo':''?>" href="index.php">Início</a><a class="<?= $pagina==='continentes'?'ativo':''?>" href="?pagina=continentes">Continentes</a><a class="<?= $pagina==='governantes'?'ativo':''?>" href="?pagina=governantes">Governantes</a><a class="<?= $pagina==='paises'?'ativo':''?>" href="?pagina=paises">Países</a><a class="<?= $pagina==='cidades'?'ativo':''?>" href="?pagina=cidades">Cidades</a></nav>
+<div class="user-bar">Olá, <strong>&nbsp;<?=e($_SESSION["usuario_nome"])?></strong>&nbsp;|&nbsp;<a href="?pagina=alterar_senha">Alterar senha</a>&nbsp;|&nbsp;<a href="?logout=1">Sair</a></div>
+<nav><a class="<?= $pagina==='home'?'ativo':''?>" href="index.php">Início</a><a class="<?= $pagina==='continentes'?'ativo':''?>" href="?pagina=continentes">Continentes</a><a class="<?= $pagina==='governantes'?'ativo':''?>" href="?pagina=governantes">Governantes</a><a class="<?= $pagina==='paises'?'ativo':''?>" href="?pagina=paises">Países</a><a class="<?= $pagina==='cidades'?'ativo':''?>" href="?pagina=cidades">Cidades</a><a class="<?= $pagina==='alterar_senha'?'ativo':''?>" href="?pagina=alterar_senha">Alterar senha</a></nav>
 <div class="container"><?php if($mensagem):?><div class="alert success"><?=e($mensagem)?></div><?php endif;?><?php if($erro):?><div class="alert error"><?=e($erro)?></div><?php endif;?>
 
 <?php if($pagina==="home"):?>
@@ -195,6 +227,20 @@ $ed=(int)($_GET["editar"]??0);$r=$ed?$conexao->query("SELECT * FROM governantes 
 $ed=(int)($_GET["editar"]??0);$r=$ed?$conexao->query("SELECT * FROM paises WHERE id=$ed")->fetch_assoc():null;$cs=$conexao->query("SELECT * FROM continentes ORDER BY nome");$gs=$conexao->query("SELECT * FROM governantes ORDER BY nome");?>
 <div class="card"><h2><?=$r?"Editar":"Cadastrar"?> País</h2><form method="post" class="grid"><input type="hidden" name="acao" value="<?=$r?'editar_pais':'cadastrar_pais'?>"><?php if($r):?><input type="hidden" name="id" value="<?=$r['id']?>"><?php endif;?><div><label>Nome</label><input name="nome" value="<?=e($r['nome']??'')?>" required></div><div><label>Continente</label><select name="continente_id" required><option value="">Selecione</option><?php while($c=$cs->fetch_assoc()):?><option value="<?=$c['id']?>" <?=($r['continente_id']??0)==$c['id']?"selected":""?>><?=e($c['nome'])?></option><?php endwhile;?></select></div><div><label>População</label><input type="number" name="populacao" value="<?=e($r['populacao']??'')?>" required></div><div><label>Área</label><input type="number" step=".01" name="area" value="<?=e($r['area']??'')?>" required></div><div><label>Idioma</label><input name="idioma" value="<?=e($r['idioma']??'')?>" required></div><div><label>Governante</label><select name="governante_id" required><option value="">Selecione</option><?php while($g=$gs->fetch_assoc()):?><option value="<?=$g['id']?>" <?=($r['governante_id']??0)==$g['id']?"selected":""?>><?=e($g['nome'])?></option><?php endwhile;?></select></div><div><label>Clima</label><input name="clima" value="<?=e($r['clima']??'')?>" required></div><div><label>Regime político</label><input name="regime_politico" value="<?=e($r['regime_politico']??'')?>" required></div><div><label>Moeda</label><input name="moeda" value="<?=e($r['moeda']??'')?>" required></div><div><button class="btn btn-success"><?=$r?"Atualizar":"Cadastrar"?></button></div></form></div>
 <div class="card"><h2>Países cadastrados</h2><input class="search" placeholder="Pesquisar..." oninput="filtrar(this)"><table><tr><th>ID</th><th>Nome</th><th>Continente</th><th>População</th><th>Idioma</th><th>Clima</th><th>Moeda</th><th>Ações</th></tr><?php $q=$conexao->query("SELECT p.*,c.nome continente FROM paises p LEFT JOIN continentes c ON c.id=p.continente_id ORDER BY p.nome");while($x=$q->fetch_assoc()):?><tr><td><?=$x['id']?></td><td><?=e($x['nome'])?></td><td><?=e($x['continente'])?></td><td><?=number_format($x['populacao'],0,",",".")?></td><td><?=e($x['idioma'])?></td><td><?=e($x['clima'])?></td><td><?=e($x['moeda'])?></td><td class="actions"><a class="btn btn-warning" href="?pagina=paises&editar=<?=$x['id']?>">Editar</a><a class="btn btn-danger" href="?pagina=paises&excluir=<?=$x['id']?>&tipo=pais" onclick="return confirm('Excluir país? As cidades vinculadas serão excluídas.')">Excluir</a></td></tr><?php endwhile;?></table></div>
+
+<?php elseif($pagina==="alterar_senha"):?>
+<div class="card" style="max-width:420px;margin:0 auto">
+<h2>Alterar senha de acesso</h2>
+<?php if($erroSenha):?><div class="alert error"><?=e($erroSenha)?></div><?php endif;?>
+<?php if($mensagemSenha):?><div class="alert success"><?=e($mensagemSenha)?></div><?php endif;?>
+<form method="post">
+<input type="hidden" name="acao" value="alterar_senha">
+<label>Senha atual</label><input type="password" name="senha_atual" required>
+<label>Nova senha</label><input type="password" name="nova_senha" minlength="6" required>
+<label>Confirmar nova senha</label><input type="password" name="confirmar_senha" minlength="6" required>
+<button class="btn btn-success" style="margin-top:18px;width:100%">Salvar nova senha</button>
+</form>
+</div>
 
 <?php elseif($pagina==="cidades"):
 $ed=(int)($_GET["editar"]??0);$r=$ed?$conexao->query("SELECT * FROM cidades WHERE id=$ed")->fetch_assoc():null;$ps=$conexao->query("SELECT * FROM paises ORDER BY nome");$gs=$conexao->query("SELECT * FROM governantes ORDER BY nome");?>
