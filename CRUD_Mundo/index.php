@@ -233,7 +233,12 @@ $ed=(int)($_GET["editar"]??0);$r=$ed?$conexao->query("SELECT * FROM paises WHERE
 $nomesCadastrados=[];$qm=$conexao->query("SELECT nome FROM paises ORDER BY nome");while($m=$qm->fetch_assoc())$nomesCadastrados[]=$m["nome"];?>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css">
 <style>
-#mapa{height:560px;border-radius:10px;z-index:0}
+#mapa{
+    height: min(560px, 65vh);
+    min-height: 350px;
+    border-radius: 10px;
+    z-index: 0;
+}
 .mapa-filtros{align-items:end;margin-bottom:16px}
 .mapa-info{display:flex;gap:18px;flex-wrap:wrap;align-items:center;margin-top:12px;font-size:14px;color:#445}
 .mapa-info i{display:inline-block;width:12px;height:12px;border-radius:50%;margin-right:6px;vertical-align:middle}
@@ -268,8 +273,10 @@ $nomesCadastrados=[];$qm=$conexao->query("SELECT nome FROM paises ORDER BY nome"
  var elBusca=document.getElementById("mapaBusca"),elRegiao=document.getElementById("mapaRegiao"),elSo=document.getElementById("mapaSoCadastrados"),elStatus=document.getElementById("mapaStatus"),elErro=document.getElementById("mapaErro");
 
  var mapa=L.map("mapa",{worldCopyJump:true,minZoom:2}).setView([20,10],2);
- L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",{maxZoom:18,attribution:"&copy; OpenStreetMap | Dados: REST Countries"}).addTo(mapa);
- var camada=L.layerGroup().addTo(mapa);
+ L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+  maxZoom: 18,
+  attribution: "&copy; OpenStreetMap contributors | Dados dos países: REST Countries"
+}).addTo(mapa); var camada=L.layerGroup().addTo(mapa);
  var paises=[];
 
  function nomePt(c){return (c.translations&&c.translations.por&&c.translations.por.common)||c.name.common}
@@ -307,8 +314,26 @@ $nomesCadastrados=[];$qm=$conexao->query("SELECT nome FROM paises ORDER BY nome"
   if(centralizar&&pts.length)mapa.fitBounds(L.latLngBounds(pts),{padding:[40,40],maxZoom:5});
  }
 
- fetch(API).then(function(r){if(!r.ok)throw new Error("HTTP "+r.status);return r.json()}).then(function(dados){
-  paises=dados.filter(function(c){return c.latlng&&c.latlng.length===2}).map(function(c){c._cad=estaCadastrado(c);return c});
+ fetch(API)
+  .then(function(r){
+    if(!r.ok) throw new Error("HTTP " + r.status);
+    return r.json();
+  })
+  .then(function(dados){
+    if(!Array.isArray(dados)){
+      throw new Error("Formato de resposta inválido");
+    }
+
+    paises = dados.filter(function(c){
+      return c.latlng && c.latlng.length === 2;
+    }).map(function(c){
+      c._cad = estaCadastrado(c);
+      return c;
+    });
+
+    if(paises.length === 0){
+      throw new Error("Nenhum país foi encontrado");
+    }
   paises.sort(function(a,b){return b.population-a.population}); // países maiores desenhados primeiro, menores ficam por cima
   desenhar(false);
  }).catch(function(err){
